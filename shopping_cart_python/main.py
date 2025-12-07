@@ -1,4 +1,4 @@
-"""Simple ecommerce MCP server exposing the Pizzaz shop widget."""
+"""Simple ecommerce MCP server exposing the shopping cart widget."""
 
 from __future__ import annotations
 
@@ -11,30 +11,30 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 TOOL_NAME = "add_to_cart"
-WIDGET_TEMPLATE_URI = "ui://widget/pizza-shop.html"
-WIDGET_TITLE = "Open Pizzaz Shop"
-WIDGET_INVOKING = "Opening the shop"
-WIDGET_INVOKED = "Shop ready"
+WIDGET_TEMPLATE_URI = "ui://widget/shopping-cart.html"
+WIDGET_TITLE = "Start shopping cart"
+WIDGET_INVOKING = "Preparing shopping cart"
+WIDGET_INVOKED = "Shopping cart ready"
 MIME_TYPE = "text/html+skybridge"
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 
 
 def _load_widget_html() -> str:
-    html_path = ASSETS_DIR / "pizzaz-shop.html"
+    html_path = ASSETS_DIR / "shopping-cart.html"
     if html_path.exists():
         return html_path.read_text(encoding="utf8")
 
-    fallback = sorted(ASSETS_DIR.glob("pizzaz-shop-*.html"))
+    fallback = sorted(ASSETS_DIR.glob("shopping-cart-*.html"))
     if fallback:
         return fallback[-1].read_text(encoding="utf8")
 
     raise FileNotFoundError(
-        f'Widget HTML for "pizzaz-shop" not found in {ASSETS_DIR}. '
+        f'Widget HTML for "shopping-cart" not found in {ASSETS_DIR}. '
         "Run `pnpm run build` to generate the assets before starting the server."
     )
 
 
-PIZZAZ_HTML = _load_widget_html()
+SHOPPING_CART_HTML = _load_widget_html()
 
 
 class CartItem(BaseModel):
@@ -120,7 +120,7 @@ async def _list_resources() -> List[types.Resource]:
             name=WIDGET_TITLE,
             title=WIDGET_TITLE,
             uri=WIDGET_TEMPLATE_URI,
-            description="Markup for the Pizzaz shop widget.",
+            description="Markup for the shopping cart widget.",
             mimeType=MIME_TYPE,
             _meta=_widget_meta(),
         )
@@ -140,7 +140,7 @@ async def _handle_read_resource(req: types.ReadResourceRequest) -> types.ServerR
         types.TextResourceContents(
             uri=WIDGET_TEMPLATE_URI,
             mimeType=MIME_TYPE,
-            text=PIZZAZ_HTML,
+            text=SHOPPING_CART_HTML,
             _meta=_widget_meta(),
         )
     ]
