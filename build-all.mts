@@ -31,6 +31,7 @@ const targets: string[] = [
   "parser-resume",
   "diagnose-resume",
   "analyze-resume",
+  "update-resume",
 ];
 const builtNames: string[] = [];
 

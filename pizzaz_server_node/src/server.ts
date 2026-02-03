@@ -39,6 +39,7 @@ type ResumeWidget = {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, "..", "..");
 const ASSETS_DIR = path.resolve(ROOT_DIR, "assets");
+const FILE_TOOL_WIDGET = ["show-parser-resume", "show-analyze-resume"]; 
 
 function readWidgetHtml(componentName: string): string {
   if (!fs.existsSync(ASSETS_DIR)) {
@@ -80,23 +81,23 @@ function widgetDescriptorMeta(widget: ResumeWidget) {
     "openai/toolInvocation/invoking": widget.invoking,
     "openai/toolInvocation/invoked": widget.invoked,
     "openai/widgetAccessible": true,
-    "openai/widgetCSP": {
-      "connect_domains": [
-        "https://oaisdmntprcentralus.blob.core.windows.net",
+    // "openai/widgetCSP": {
+      // "connect_domains": [
+      //   "https://oaisdmntprcentralus.blob.core.windows.net",
+      //   "https://localhost:4444",
+      //   "http://localhost:4444"
+      // ],
+      // "resource_domains": [
+      //   "https://oaisdmntprcentralus.blob.core.windows.net",
+      //   "https://localhost:4444",
+      //   "http://localhost:4444"
+      // ],
+      // "frame_domains": [
+        // "https://oaisdmntprcentralus.blob.core.windows.net",
         // "https://localhost:4444",
         // "http://localhost:4444"
-      ],
-      "resource_domains": [
-        "https://oaisdmntprcentralus.blob.core.windows.net",
-        // "https://localhost:4444",
-        // "http://localhost:4444"
-      ],
-      "frame_domains": [
-        "https://oaisdmntprcentralus.blob.core.windows.net",
-        // "https://localhost:4444",
-        // "http://localhost:4444"
-      ]
-    }
+      // ]
+    // }
   } as const;
 }
 
@@ -134,6 +135,15 @@ const widgets: ResumeWidget[] = [
     invoked: "finished Analyze Resume",
     html: readWidgetHtml("analyze-resume"),  // 这个别忘了修改，这个是链接到打包好的html文件
     responseText: "Rendered Analyze Resume!",
+  },
+  {
+    id: "show-update-resume",
+    title: "Show Update Resume",
+    templateUri: "ui://widget/update-resume.html",
+    invoking: "Start update Resume",
+    invoked: "finished updating Resume",
+    html: readWidgetHtml("update-resume"),  // 这个别忘了修改，这个是链接到打包好的html文件
+    responseText: "Rendered Update Resume!",
   },
 ];
 
@@ -202,7 +212,8 @@ const parserToolInputParser = z.object({
 // }));
 
 const tools: Tool[] = widgets.map((widget) => {
-  const isParser = widget.id === "show-parser-resume";
+  const isParser = FILE_TOOL_WIDGET.includes(widget.id);
+  console.log(`[server] Configuring tool "${widget.id}" as file tool: ${isParser}`);
 
   return {
     name: widget.id,
@@ -307,10 +318,57 @@ function createResumeServer(): Server {
         throw new Error(`Unknown tool: ${request.params.name}`);
       }
       if (widget.id === "show-analyze-resume") {
-        console.log("Calling analyze-resume tool with args:", request.params);
+        const args = parserToolInputParser.parse(request.params.arguments ?? {});
+        const { download_url, file_id } = args.resumePdf;
+        console.log("Calling parser-resume tool with args:", request.params);
+        console.log(`Received resume PDF - download_url: ${download_url}, file_id: ${file_id}`);
+        const url = "https://swan-api.jobright-internal.com/swan/resume/visitor/analyze";
+        const data = {
+          url: download_url,
+        };
+        let res: any = null;
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+          });
+
+          if (!response.ok) {
+            throw new Error('网络请求错误: ' + response.status);
+          }
+
+          res = await response.json(); // 直接在这里获取 JSON 数据
+          console.log('分析结果:', res);
+          
+          // 现在你可以在这里或者函数外部安全地使用 res 了
+        } catch (error) {
+          console.error('调用失败:', error);
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `✅ Got file reference!\n` +
+                `file_id: ${file_id}\n` +
+                `download_url: ${download_url ? "present" : "missing"}\n`
+            },
+          ],
+          structuredContent: {
+            resumeTopping: args.resumeTopping,
+            resumePdf: { file_id, download_url, res }, // 也回显一下，方便你在前端/日志里确认
+            // resumeStruct: res
+          },
+          _meta: widgetInvocationMeta(widget),
+        };
       }
       if (widget.id === "show-diagnose-resume") {
         console.log("Calling diagnose-resume tool with args:", request.params);
+      }
+      if (widget.id === "show-update-resume") {
+        console.log("Calling update-resume tool with args:", request.params);
       }
       if (widget.id === "show-parser-resume") {
         const args = parserToolInputParser.parse(request.params.arguments ?? {});
