@@ -496,7 +496,7 @@ function createResumeServer(): Server {
       }
       if (widget.id === "show-update-resume") {
         console.log("Calling update-resume tool with args:", request.params);
-        const args = toolInputParser.parse(request.params.arguments ?? {});
+        const args = diagnoseToolInputParser.parse(request.params.arguments ?? {});
         const fileId = args.resumePdf.file_id;
 
         // 1) 如果模型带了 res，直接用
@@ -504,18 +504,18 @@ function createResumeServer(): Server {
 
         // 2) 否则从缓存取
         const resFromCache = analysisByFileId.get(fileId);
-        console.log("[diagnose] Retrieved cached analysis for file_id:", fileId, resFromCache ? "found" : "not found");
-        console.log("[diagnose] Cached analysis content:", resFromCache);
+        console.log("[update] Retrieved cached analysis for file_id:", fileId, resFromCache ? "found" : "not found");
+        console.log("[update] Cached analysis content:", resFromCache);
 
         const resToUse = resFromArgs ?? resFromCache;
         // const resToUse = resFromCache;
 
-        console.log("[diagnose] file_id:", fileId);
-        console.log("[diagnose] has res:", Boolean(resToUse));
+        console.log("[update] file_id:", fileId);
+        console.log("[update] has res:", Boolean(resToUse));
 
-        const url = "https://swan-api.jobright-internal.com/swan/resume/visitor/diagnose";
+        const url = "https://swan-api.jobright-internal.com/swan/resume/visitor/update";
         const data = {
-          resumeDoc: resToUse,
+          structuredData: resToUse,
         }
         let res: any = null;
         try {
@@ -549,7 +549,7 @@ function createResumeServer(): Server {
           structuredContent: {
             resumeTopping: args.resumeTopping,
             resumePdf: { file_id: fileId },
-            analysis: res, // 你也可以把它回传给 widget 渲染
+            updateStruct: res, // 你也可以把它回传给 widget 渲染
           },
           _meta: widgetInvocationMeta(widget),
         };
