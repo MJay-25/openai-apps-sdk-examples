@@ -80,6 +80,23 @@ function widgetDescriptorMeta(widget: ResumeWidget) {
     "openai/toolInvocation/invoking": widget.invoking,
     "openai/toolInvocation/invoked": widget.invoked,
     "openai/widgetAccessible": true,
+    "openai/widgetCSP": {
+      "connect_domains": [
+        "https://oaisdmntprcentralus.blob.core.windows.net",
+        // "https://localhost:4444",
+        // "http://localhost:4444"
+      ],
+      "resource_domains": [
+        "https://oaisdmntprcentralus.blob.core.windows.net",
+        // "https://localhost:4444",
+        // "http://localhost:4444"
+      ],
+      "frame_domains": [
+        "https://oaisdmntprcentralus.blob.core.windows.net",
+        // "https://localhost:4444",
+        // "http://localhost:4444"
+      ]
+    }
   } as const;
 }
 
@@ -144,19 +161,69 @@ const toolInputParser = z.object({
   resumeTopping: z.string(),
 });
 
-const tools: Tool[] = widgets.map((widget) => ({
-  name: widget.id,
-  description: widget.title,
-  inputSchema: toolInputSchema,
-  title: widget.title,
-  _meta: widgetDescriptorMeta(widget),
-  // To disable the approval prompt for the widgets
-  annotations: {
-    destructiveHint: false,
-    openWorldHint: false,
-    readOnlyHint: true,
+const fileParamParser = z.object({
+  download_url: z.string().url(),
+  file_id: z.string(),
+});
+
+const parserToolInputSchema = {
+  type: "object",
+  properties: {
+    resumeTopping: {
+      type: "string",
+      description: "Topping to mention when rendering the widget.",
+    },
+    resumePdf: {
+      description: "Uploaded resume PDF",
+    },
   },
-}));
+  required: ["resumeTopping", "resumePdf"],
+  additionalProperties: false,
+} as const;
+
+const parserToolInputParser = z.object({
+  resumeTopping: z.string(),
+  resumePdf: fileParamParser,
+});
+
+
+// const tools: Tool[] = widgets.map((widget) => ({
+//   name: widget.id,
+//   description: widget.title,
+//   inputSchema: toolInputSchema,
+//   title: widget.title,
+//   _meta: widgetDescriptorMeta(widget),
+//   // To disable the approval prompt for the widgets
+//   annotations: {
+//     destructiveHint: false,
+//     openWorldHint: false,
+//     readOnlyHint: true,
+//   },
+// }));
+
+const tools: Tool[] = widgets.map((widget) => {
+  const isParser = widget.id === "show-parser-resume";
+
+  return {
+    name: widget.id,
+    description: widget.title,
+    title: widget.title,
+
+    inputSchema: isParser ? parserToolInputSchema : toolInputSchema,
+
+    _meta: {
+      ...widgetDescriptorMeta(widget),
+      ...(isParser ? { "openai/fileParams": ["resumePdf"] } : {}),
+    },
+
+    annotations: {
+      destructiveHint: false,
+      openWorldHint: false,
+      readOnlyHint: true,
+    },
+  };
+});
+
 
 const resources: Resource[] = widgets.map((widget) => ({
   uri: widget.templateUri,
@@ -246,7 +313,71 @@ function createResumeServer(): Server {
         console.log("Calling diagnose-resume tool with args:", request.params);
       }
       if (widget.id === "show-parser-resume") {
+        const args = parserToolInputParser.parse(request.params.arguments ?? {});
+        const { download_url, file_id } = args.resumePdf;
         console.log("Calling parser-resume tool with args:", request.params);
+        console.log(`Received resume PDF - download_url: ${download_url}, file_id: ${file_id}`);
+         // ✅ 验证：不下载文件，只做“最小网络探测”
+        let verify: any = {
+          file_id,
+          has_download_url: Boolean(download_url),
+        };
+
+        // 1) 先尝试 HEAD（通常不会拉取 body）
+        try {
+          const headRes = await fetch(download_url, { method: "HEAD" });
+          verify.head = {
+            ok: headRes.ok,
+            status: headRes.status,
+            content_type: headRes.headers.get("content-type"),
+            content_length: headRes.headers.get("content-length"),
+            content_disposition: headRes.headers.get("content-disposition"),
+          };
+        } catch (e: any) {
+          verify.head = { error: String(e?.message ?? e) };
+        }
+
+        // 2) 有些服务不支持 HEAD：再用 Range 拉 1 个字节（仍然不算“下载 PDF”）
+        //    你也可以只保留其中一个校验方式。
+        try {
+          const rangeRes = await fetch(download_url, {
+            method: "GET",
+            headers: { Range: "bytes=0-0" },
+          });
+          verify.range = {
+            ok: rangeRes.ok,
+            status: rangeRes.status,
+            content_type: rangeRes.headers.get("content-type"),
+            content_range: rangeRes.headers.get("content-range"),
+            accept_ranges: rangeRes.headers.get("accept-ranges"),
+          };
+          // 读 1 个字节只是为了确保链接确实能返回内容
+          const ab = await rangeRes.arrayBuffer();
+          verify.range.bytes_read = ab.byteLength; // 通常是 1
+        } catch (e: any) {
+          verify.range = { error: String(e?.message ?? e) };
+        }
+
+        console.log("[show-parser-resume] file verify:", verify);
+
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `✅ Got file reference!\n` +
+                `file_id: ${file_id}\n` +
+                `download_url: ${download_url ? "present" : "missing"}\n` +
+                `HEAD status: ${verify.head?.status ?? "n/a"} | Range status: ${verify.range?.status ?? "n/a"}`,
+            },
+          ],
+          structuredContent: {
+            resumeTopping: args.resumeTopping,
+            resumePdf: { file_id, download_url }, // 也回显一下，方便你在前端/日志里确认
+            verify,
+          },
+          _meta: widgetInvocationMeta(widget),
+        };
       }
 
       const args = toolInputParser.parse(request.params.arguments ?? {});
