@@ -55,7 +55,7 @@ export default function App() {
   const displayMode = useOpenAiGlobal("displayMode");
   const allowInspector = displayMode === "fullscreen";
   const maxHeight = useMaxHeight() ?? undefined;
-
+  
   useEffect(() => {
     if (mapObj.current) return;
     mapObj.current = new mapboxgl.Map({

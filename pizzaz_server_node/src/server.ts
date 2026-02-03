@@ -26,7 +26,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
-type PizzazWidget = {
+type ResumeWidget = {
   id: string;
   title: string;
   templateUri: string;
@@ -74,7 +74,7 @@ function readWidgetHtml(componentName: string): string {
   return htmlContents;
 }
 
-function widgetDescriptorMeta(widget: PizzazWidget) {
+function widgetDescriptorMeta(widget: ResumeWidget) {
   return {
     "openai/outputTemplate": widget.templateUri,
     "openai/toolInvocation/invoking": widget.invoking,
@@ -83,63 +83,45 @@ function widgetDescriptorMeta(widget: PizzazWidget) {
   } as const;
 }
 
-function widgetInvocationMeta(widget: PizzazWidget) {
+function widgetInvocationMeta(widget: ResumeWidget) {
   return {
     "openai/toolInvocation/invoking": widget.invoking,
     "openai/toolInvocation/invoked": widget.invoked,
   } as const;
 }
 
-const widgets: PizzazWidget[] = [
+const widgets: ResumeWidget[] = [
   {
-    id: "pizza-map",
-    title: "Show Pizza Map",
-    templateUri: "ui://widget/pizza-map.html",
-    invoking: "Hand-tossing a map",
-    invoked: "Served a fresh map",
-    html: readWidgetHtml("pizzaz"),
-    responseText: "Rendered a pizza map!",
+    id: "show-parser-resume",
+    title: "Show Parser Resume",
+    templateUri: "ui://widget/parser-resume.html",
+    invoking: "Start Parser Resume",
+    invoked: "finished Parsing Resume",
+    html: readWidgetHtml("parser-resume"),  // 这个别忘了修改，这个是链接到打包好的html文件
+    responseText: "Rendered Parser Resume!",
   },
   {
-    id: "pizza-carousel",
-    title: "Show Pizza Carousel",
-    templateUri: "ui://widget/pizza-carousel.html",
-    invoking: "Carousel some spots",
-    invoked: "Served a fresh carousel",
-    html: readWidgetHtml("pizzaz-carousel"),
-    responseText: "Rendered a pizza carousel!",
+    id: "show-diagnose-resume",
+    title: "Show Diagnose Resume",
+    templateUri: "ui://widget/diagnose-resume.html",
+    invoking: "Start Diagnose Resume",
+    invoked: "finished Diagnose Resume",
+    html: readWidgetHtml("diagnose-resume"),  // 这个别忘了修改，这个是链接到打包好的html文件
+    responseText: "Rendered Diagnose Resume!",
   },
   {
-    id: "pizza-albums",
-    title: "Show Pizza Album",
-    templateUri: "ui://widget/pizza-albums.html",
-    invoking: "Hand-tossing an album",
-    invoked: "Served a fresh album",
-    html: readWidgetHtml("pizzaz-albums"),
-    responseText: "Rendered a pizza album!",
-  },
-  {
-    id: "pizza-list",
-    title: "Show Pizza List",
-    templateUri: "ui://widget/pizza-list.html",
-    invoking: "Hand-tossing a list",
-    invoked: "Served a fresh list",
-    html: readWidgetHtml("pizzaz-list"),
-    responseText: "Rendered a pizza list!",
-  },
-  {
-    id: "pizza-shop",
-    title: "Open Pizzaz Shop",
-    templateUri: "ui://widget/pizza-shop.html",
-    invoking: "Opening the shop",
-    invoked: "Shop opened",
-    html: readWidgetHtml("pizzaz-shop"),
-    responseText: "Rendered the Pizzaz shop!",
+    id: "show-analyze-resume",
+    title: "Show Analyze Resume",
+    templateUri: "ui://widget/analyze-resume.html",
+    invoking: "Start Analyze Resume",
+    invoked: "finished Analyze Resume",
+    html: readWidgetHtml("analyze-resume"),  // 这个别忘了修改，这个是链接到打包好的html文件
+    responseText: "Rendered Analyze Resume!",
   },
 ];
 
-const widgetsById = new Map<string, PizzazWidget>();
-const widgetsByUri = new Map<string, PizzazWidget>();
+const widgetsById = new Map<string, ResumeWidget>();
+const widgetsByUri = new Map<string, ResumeWidget>();
 
 widgets.forEach((widget) => {
   widgetsById.set(widget.id, widget);
@@ -149,17 +131,17 @@ widgets.forEach((widget) => {
 const toolInputSchema = {
   type: "object",
   properties: {
-    pizzaTopping: {
+    resumeTopping: {
       type: "string",
       description: "Topping to mention when rendering the widget.",
     },
   },
-  required: ["pizzaTopping"],
+  required: ["resumeTopping"],
   additionalProperties: false,
 } as const;
 
 const toolInputParser = z.object({
-  pizzaTopping: z.string(),
+  resumeTopping: z.string(),
 });
 
 const tools: Tool[] = widgets.map((widget) => ({
@@ -192,10 +174,10 @@ const resourceTemplates: ResourceTemplate[] = widgets.map((widget) => ({
   _meta: widgetDescriptorMeta(widget),
 }));
 
-function createPizzazServer(): Server {
+function createResumeServer(): Server {
   const server = new Server(
     {
-      name: "pizzaz-node",
+      name: "resume-node",
       version: "0.1.0",
     },
     {
@@ -257,6 +239,15 @@ function createPizzazServer(): Server {
       if (!widget) {
         throw new Error(`Unknown tool: ${request.params.name}`);
       }
+      if (widget.id === "show-analyze-resume") {
+        console.log("Calling analyze-resume tool with args:", request.params);
+      }
+      if (widget.id === "show-diagnose-resume") {
+        console.log("Calling diagnose-resume tool with args:", request.params);
+      }
+      if (widget.id === "show-parser-resume") {
+        console.log("Calling parser-resume tool with args:", request.params);
+      }
 
       const args = toolInputParser.parse(request.params.arguments ?? {});
 
@@ -268,7 +259,7 @@ function createPizzazServer(): Server {
           },
         ],
         structuredContent: {
-          pizzaTopping: args.pizzaTopping,
+          resumeTopping: args.resumeTopping,
         },
         _meta: widgetInvocationMeta(widget),
       };
@@ -289,14 +280,18 @@ const ssePath = "/mcp";
 const postPath = "/mcp/messages";
 
 async function handleSseRequest(res: ServerResponse) {
+  console.info("[mcp] SSE connect request", res);
   res.setHeader("Access-Control-Allow-Origin", "*");
-  const server = createPizzazServer();
+  const server = createResumeServer();
   const transport = new SSEServerTransport(postPath, res);
   const sessionId = transport.sessionId;
+
+  console.info(`[mcp] SSE session created: ${sessionId}`);
 
   sessions.set(sessionId, { server, transport });
 
   transport.onclose = async () => {
+    console.log(`[mcp] SSE session closed: ${sessionId}`);
     sessions.delete(sessionId);
     await server.close();
   };
@@ -307,6 +302,7 @@ async function handleSseRequest(res: ServerResponse) {
 
   try {
     await server.connect(transport);
+    console.log(`[mcp] SSE session connected: ${sessionId}`);
   } catch (error) {
     sessions.delete(sessionId);
     console.error("Failed to start SSE session", error);
@@ -321,11 +317,13 @@ async function handlePostMessage(
   res: ServerResponse,
   url: URL
 ) {
+  console.info(`[mcp] POST message: ${url.toString()}`);
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "content-type");
   const sessionId = url.searchParams.get("sessionId");
 
   if (!sessionId) {
+    console.warn("[mcp] Missing sessionId in POST message");
     res.writeHead(400).end("Missing sessionId query parameter");
     return;
   }
@@ -333,12 +331,14 @@ async function handlePostMessage(
   const session = sessions.get(sessionId);
 
   if (!session) {
+    console.warn(`[mcp] Unknown sessionId: ${sessionId}`);
     res.writeHead(404).end("Unknown session");
     return;
   }
 
   try {
     await session.transport.handlePostMessage(req, res);
+    console.log(`[mcp] POST message handled for session: ${sessionId}`);
   } catch (error) {
     console.error("Failed to process message", error);
     if (!res.headersSent) {
@@ -352,6 +352,7 @@ const port = Number.isFinite(portEnv) ? portEnv : 8000;
 
 const httpServer = createServer(
   async (req: IncomingMessage, res: ServerResponse) => {
+    console.log(`[mcp] Incoming request: ${req.method} ${req.url}`);
     if (!req.url) {
       res.writeHead(400).end("Missing URL");
       return;
@@ -392,7 +393,7 @@ httpServer.on("clientError", (err: Error, socket) => {
 });
 
 httpServer.listen(port, () => {
-  console.log(`Pizzaz MCP server listening on http://localhost:${port}`);
+  console.log(`Resume MCP server listening on http://localhost:${port}`);
   console.log(`  SSE stream: GET http://localhost:${port}${ssePath}`);
   console.log(
     `  Message post endpoint: POST http://localhost:${port}${postPath}?sessionId=...`
