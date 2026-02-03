@@ -40,6 +40,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, "..", "..");
 const ASSETS_DIR = path.resolve(ROOT_DIR, "assets");
 const FILE_TOOL_WIDGET = ["show-parser-resume", "show-analyze-resume"]; 
+const DIAGNOSE_TOOL_WIDGET = ["show-diagnose-resume", "show-update-resume"];
 
 function readWidgetHtml(componentName: string): string {
   if (!fs.existsSync(ASSETS_DIR)) {
@@ -196,6 +197,40 @@ const parserToolInputParser = z.object({
   resumePdf: fileParamParser,
 });
 
+const diagnoseToolInputSchema = {
+  type: "object",
+  properties: {
+    resumeTopping: {
+      type: "string",
+      description: "Topping to mention when rendering the widget.",
+    },
+    resumePdf: {
+      type: "object",
+      properties: {
+        file_id: { type: "string" },
+        // 诊断阶段不一定需要 download_url，但保留也行
+        download_url: { type: "string" },
+        // 如果模型愿意带过来，就直接用
+        res: {},
+      },
+      required: ["file_id"],
+      additionalProperties: true,
+    },
+  },
+  required: ["resumeTopping", "resumePdf"],
+  additionalProperties: false,
+} as const;
+
+const diagnoseToolInputParser = z.object({
+  resumeTopping: z.string(),
+  resumePdf: z.object({
+    file_id: z.string(),
+    download_url: z.string().optional(),
+    res: z.any().optional(),
+  }),
+});
+
+
 
 // const tools: Tool[] = widgets.map((widget) => ({
 //   name: widget.id,
@@ -211,20 +246,49 @@ const parserToolInputParser = z.object({
 //   },
 // }));
 
+// const tools: Tool[] = widgets.map((widget) => {
+//   const isParser = FILE_TOOL_WIDGET.includes(widget.id);
+//   console.log(`[server] Configuring tool "${widget.id}" as file tool: ${isParser}`);
+
+//   return {
+//     name: widget.id,
+//     description: widget.title,
+//     title: widget.title,
+
+//     inputSchema: isParser ? parserToolInputSchema : toolInputSchema,
+
+//     _meta: {
+//       ...widgetDescriptorMeta(widget),
+//       ...(isParser ? { "openai/fileParams": ["resumePdf"] } : {}),
+//     },
+
+//     annotations: {
+//       destructiveHint: false,
+//       openWorldHint: false,
+//       readOnlyHint: true,
+//     },
+//   };
+// });
+
+
 const tools: Tool[] = widgets.map((widget) => {
-  const isParser = FILE_TOOL_WIDGET.includes(widget.id);
-  console.log(`[server] Configuring tool "${widget.id}" as file tool: ${isParser}`);
+  const isFileTool = FILE_TOOL_WIDGET.includes(widget.id);
+  const isDiagnose = DIAGNOSE_TOOL_WIDGET.includes(widget.id);
 
   return {
     name: widget.id,
     description: widget.title,
     title: widget.title,
 
-    inputSchema: isParser ? parserToolInputSchema : toolInputSchema,
+    inputSchema: isFileTool
+      ? parserToolInputSchema
+      : isDiagnose
+        ? diagnoseToolInputSchema
+        : toolInputSchema,
 
     _meta: {
       ...widgetDescriptorMeta(widget),
-      ...(isParser ? { "openai/fileParams": ["resumePdf"] } : {}),
+      ...(isFileTool ? { "openai/fileParams": ["resumePdf"] } : {}),
     },
 
     annotations: {
@@ -234,7 +298,6 @@ const tools: Tool[] = widgets.map((widget) => {
     },
   };
 });
-
 
 const resources: Resource[] = widgets.map((widget) => ({
   uri: widget.templateUri,
@@ -252,6 +315,8 @@ const resourceTemplates: ResourceTemplate[] = widgets.map((widget) => ({
   _meta: widgetDescriptorMeta(widget),
 }));
 
+const analysisByFileId = new Map<string, any>();
+
 function createResumeServer(): Server {
   const server = new Server(
     {
@@ -265,6 +330,8 @@ function createResumeServer(): Server {
       },
     }
   );
+
+  // const analysisByFileId = new Map<string, any>();
 
   server.setRequestHandler(
     ListResourcesRequestSchema,
@@ -340,7 +407,11 @@ function createResumeServer(): Server {
 
           res = await response.json(); // 直接在这里获取 JSON 数据
           console.log('分析结果:', res);
-          
+
+          analysisByFileId.set(file_id, res.result);
+          console.log("[analyze] Caching analysis for file_id:", file_id);
+          console.log("[analyze] Analysis content:", res.result);
+          res = res.result;
           // 现在你可以在这里或者函数外部安全地使用 res 了
         } catch (error) {
           console.error('调用失败:', error);
@@ -365,10 +436,123 @@ function createResumeServer(): Server {
         };
       }
       if (widget.id === "show-diagnose-resume") {
-        console.log("Calling diagnose-resume tool with args:", request.params);
+        const args = diagnoseToolInputParser.parse(request.params.arguments ?? {});
+        const fileId = args.resumePdf.file_id;
+
+        // 1) 如果模型带了 res，直接用
+        const resFromArgs = args.resumePdf.res;
+
+        // 2) 否则从缓存取
+        const resFromCache = analysisByFileId.get(fileId);
+        console.log("[diagnose] Retrieved cached analysis for file_id:", fileId, resFromCache ? "found" : "not found");
+        console.log("[diagnose] Cached analysis content:", resFromCache);
+
+        const resToUse = resFromArgs ?? resFromCache;
+        // const resToUse = resFromCache;
+
+        console.log("[diagnose] file_id:", fileId);
+        console.log("[diagnose] has res:", Boolean(resToUse));
+
+        const url = "https://swan-api.jobright-internal.com/swan/resume/visitor/diagnose";
+        const data = {
+          resumeDoc: resToUse,
+        }
+        let res: any = null;
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+          });
+
+          if (!response.ok) {
+            throw new Error('网络请求错误: ' + response.status);
+          }
+
+          res = await response.json(); // 直接在这里获取 JSON 数据
+          console.log('分析结果:', res);
+
+          // analysisByFileId.set(file_id, res.result);
+          // 现在你可以在这里或者函数外部安全地使用 res 了
+        } catch (error) {
+          console.error('调用失败:', error);
+        }
+
+        // ✅ 这里就能用 resToUse 做诊断逻辑了
+        return {
+          content: [
+            {
+              type: "text",
+              text: `✅ Diagnose ready (file_id=${fileId})`,
+            },
+          ],
+          structuredContent: {
+            resumeTopping: args.resumeTopping,
+            resumePdf: { file_id: fileId },
+            analysis: res, // 你也可以把它回传给 widget 渲染
+          },
+          _meta: widgetInvocationMeta(widget),
+        };
       }
       if (widget.id === "show-update-resume") {
         console.log("Calling update-resume tool with args:", request.params);
+        const args = toolInputParser.parse(request.params.arguments ?? {});
+        const fileId = args.resumePdf.file_id;
+
+        // 1) 如果模型带了 res，直接用
+        const resFromArgs = args.resumePdf.res;
+
+        // 2) 否则从缓存取
+        const resFromCache = analysisByFileId.get(fileId);
+        console.log("[diagnose] Retrieved cached analysis for file_id:", fileId, resFromCache ? "found" : "not found");
+        console.log("[diagnose] Cached analysis content:", resFromCache);
+
+        const resToUse = resFromArgs ?? resFromCache;
+        // const resToUse = resFromCache;
+
+        console.log("[diagnose] file_id:", fileId);
+        console.log("[diagnose] has res:", Boolean(resToUse));
+
+        const url = "https://swan-api.jobright-internal.com/swan/resume/visitor/diagnose";
+        const data = {
+          resumeDoc: resToUse,
+        }
+        let res: any = null;
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+          });
+
+          if (!response.ok) {
+            throw new Error('网络请求错误: ' + response.status);
+          }
+
+          res = await response.json(); // 直接在这里获取 JSON 数据
+          console.log('分析结果:', res);
+
+          // analysisByFileId.set(file_id, res.result);
+          // 现在你可以在这里或者函数外部安全地使用 res 了
+        } catch (error) {
+          console.error('调用失败:', error);
+        }
+
+        // ✅ 这里就能用 resToUse 做诊断逻辑了
+        return {
+          content: [
+            {
+              type: "text",
+              text: `✅ Diagnose ready (file_id=${fileId})`,
+            },
+          ],
+          structuredContent: {
+            resumeTopping: args.resumeTopping,
+            resumePdf: { file_id: fileId },
+            analysis: res, // 你也可以把它回传给 widget 渲染
+          },
+          _meta: widgetInvocationMeta(widget),
+        };
       }
       if (widget.id === "show-parser-resume") {
         const args = parserToolInputParser.parse(request.params.arguments ?? {});

@@ -22,7 +22,7 @@ function App() {
   return (
     <div>
       <h1>Here is analyze</h1>
-      {/* <pre>{JSON.stringify(resumeStruct, null, 2)}</pre> */}
+      <pre>{JSON.stringify(resumeStruct, null, 2)}</pre>
     </div>
   );
 }
