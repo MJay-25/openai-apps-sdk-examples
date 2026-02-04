@@ -224,10 +224,10 @@ const updateItemSchema = {
     action: {
       type: "string",
       description: `Patch action. one of "new" | "update" | "add" | "delete".
-          - "new": create an empty entry in a section (e.g., itemId "workExperience0"). value is not required.
-          - "add": add a new value to a list at itemId. value is required.
-          - "update": update a value at itemId. value is required.
-          - "delete": delete the value at itemId. value is not required.
+          - "new": create an empty entry in a section (e.g., indexPath "workExperience0"). value is not required.
+          - "add": add a new value to a list at indexPath. value is required.
+          - "update": update a value at indexPath. value is required.
+          - "delete": delete the value at indexPath. value is not required.
       `,
     },
     value: {
@@ -270,10 +270,10 @@ const updateToolInputSchema = {
           Must be a string.
 
         - action: one of "new" | "update" | "add" | "delete"
-          - "new": create an empty entry in a section (e.g., itemId "workExperience0"). value is not required.
-          - "add": add a new value to a list at itemId. value is required.
-          - "update": update a value at itemId. value is required.
-          - "delete": delete the value at itemId. value is not required.
+          - "new": create an empty entry in a section (e.g., indexPath "workExperience0"). value is not required.
+          - "add": add a new value to a list at indexPath. value is required.
+          - "update": update a value at indexPath. value is required.
+          - "delete": delete the value at indexPath. value is not required.
 
         - value: required for "add" and "update"; optional for "new" and "delete"; must be a string when provided.
 
