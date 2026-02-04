@@ -36,6 +36,21 @@ type ResumeWidget = {
   responseText: string;
 };
 
+export enum RESUME_UPDATE_SECTION {
+  personalInfo = 2,
+  summary = 1,
+  education = 3,
+  workExperience = 4,
+  skills = 5,
+  resumeAttr = 6,
+  projects = 7,
+  certifications = 8,
+  achievements = 9,
+  languages = 10,
+  publications = 11,
+  extracurricularExperience = 12,
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, "..", "..");
 const ASSETS_DIR = path.resolve(ROOT_DIR, "assets");
@@ -584,7 +599,40 @@ function createResumeServer(): Server {
         } catch (error) {
           console.error('[update] 调用失败:', error);
         }
+        
+        const urlPdf = "https://api.jobright.ai/api/resume-pdf/download";
+        const datePdfReq = {
+          resumeTailor: res.result,
+          template: "Standard",
+          sectionLayout: res.result.sectionOrders.map((key: string) => {
+            const sectionDetail = res.result.sections.find((sec: any) => sec.type === key);
+            return {
+              section: RESUME_UPDATE_SECTION[key as keyof typeof RESUME_UPDATE_SECTION],
+              name: sectionDetail ? sectionDetail.name : key,
+              show: true,
+            }
+          }),
+        }
+        console.log('[update] Sending pdf request with data:', JSON.stringify(datePdfReq));
+        console.log('[update] Start fetching pdf');
+        let resPdf: any = null;
+        let pdfRes = await fetch(urlPdf, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(datePdfReq)
+        })
 
+        console.log('[update] pdf response status:', pdfRes.status);
+        if (!pdfRes.ok) {
+          const text = await pdfRes.text().catch(() => "");
+          throw new Error(`PDF request failed: ${pdfRes.status} ${text}`);
+        }
+
+        // 1) 接收成 Blob（二进制）
+        const blob = await pdfRes.blob();
+
+        // 2) 生成可访问的临时 URL
+        // const blobUrl = URL.createObjectURL(blob);
         return {
           content: [
             {
