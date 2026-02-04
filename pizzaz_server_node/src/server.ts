@@ -82,23 +82,6 @@ function widgetDescriptorMeta(widget: ResumeWidget) {
     "openai/toolInvocation/invoking": widget.invoking,
     "openai/toolInvocation/invoked": widget.invoked,
     "openai/widgetAccessible": true,
-    // "openai/widgetCSP": {
-      // "connect_domains": [
-      //   "https://oaisdmntprcentralus.blob.core.windows.net",
-      //   "https://localhost:4444",
-      //   "http://localhost:4444"
-      // ],
-      // "resource_domains": [
-      //   "https://oaisdmntprcentralus.blob.core.windows.net",
-      //   "https://localhost:4444",
-      //   "http://localhost:4444"
-      // ],
-      // "frame_domains": [
-        // "https://oaisdmntprcentralus.blob.core.windows.net",
-        // "https://localhost:4444",
-        // "http://localhost:4444"
-      // ]
-    // }
   } as const;
 }
 
@@ -185,7 +168,7 @@ const parserToolInputSchema = {
       description: "Topping to mention when rendering the widget.",
     },
     resumePdf: {
-      description: "Uploaded resume PDF",
+      description: "Upload a resume in PDF, DOC, or DOCX format and return the parsed JSON structure.",
     },
   },
   required: ["resumeTopping", "resumePdf"],
@@ -230,50 +213,103 @@ const diagnoseToolInputParser = z.object({
   }),
 });
 
+const updateItemSchema = {
+  type: "object",
+  properties: {
+    indexPath: {
+      type: "string",
+      description:
+        `target field path in camelCase with indexes appended, e.g."workExperience0.jobTitle", "education0.organization", "workExperience0.jobDescriptions1".Must be a string.`,
+    },
+    action: {
+      type: "string",
+      description: `Patch action. one of "new" | "update" | "add" | "delete".
+          - "new": create an empty entry in a section (e.g., itemId "workExperience0"). value is not required.
+          - "add": add a new value to a list at itemId. value is required.
+          - "update": update a value at itemId. value is required.
+          - "delete": delete the value at itemId. value is not required.
+      `,
+    },
+    value: {
+      type: "string",
+      description:
+        'New value for the patch. Required for "add" and "update"; optional for "new" and "delete"; must be a string when provided',
+    },
+  },
+  required: ["indexPath", "action"],
+  additionalProperties: false,
+} as const;
 
 
-// const tools: Tool[] = widgets.map((widget) => ({
-//   name: widget.id,
-//   description: widget.title,
-//   inputSchema: toolInputSchema,
-//   title: widget.title,
-//   _meta: widgetDescriptorMeta(widget),
-//   // To disable the approval prompt for the widgets
-//   annotations: {
-//     destructiveHint: false,
-//     openWorldHint: false,
-//     readOnlyHint: true,
-//   },
-// }));
+const updateToolInputSchema = {
+  type: "object",
+  properties: {
+    resumeTopping: {
+      type: "string",
+      description: "Topping to mention when rendering the widget.",
+    },
+    resumePdf: {
+      type: "object",
+      properties: {
+        file_id: { type: "string" },
+        download_url: { type: "string" },
+        res: {},
+      },
+      required: ["file_id"],
+      additionalProperties: true,
+    },
 
-// const tools: Tool[] = widgets.map((widget) => {
-//   const isParser = FILE_TOOL_WIDGET.includes(widget.id);
-//   console.log(`[server] Configuring tool "${widget.id}" as file tool: ${isParser}`);
+    // ✅ 关键：让模型生成 items（patch 列表）
+    items: {
+      type: "array",
+      description:
+        `Generate patch instructions for updating structuredData.
+        Each item: { indexPath, action, value }.
+        - indexPath: target field path in camelCase with indexes appended, e.g.
+          "workExperience0.jobTitle", "education0.organization", "workExperience0.jobDescriptions1".
+          Must be a string.
 
-//   return {
-//     name: widget.id,
-//     description: widget.title,
-//     title: widget.title,
+        - action: one of "new" | "update" | "add" | "delete"
+          - "new": create an empty entry in a section (e.g., itemId "workExperience0"). value is not required.
+          - "add": add a new value to a list at itemId. value is required.
+          - "update": update a value at itemId. value is required.
+          - "delete": delete the value at itemId. value is not required.
 
-//     inputSchema: isParser ? parserToolInputSchema : toolInputSchema,
+        - value: required for "add" and "update"; optional for "new" and "delete"; must be a string when provided.
 
-//     _meta: {
-//       ...widgetDescriptorMeta(widget),
-//       ...(isParser ? { "openai/fileParams": ["resumePdf"] } : {}),
-//     },
+        Return only minimal necessary changes.`,
+      items: updateItemSchema,
+    },
+  },
+  required: ["resumeTopping", "resumePdf"],
+  additionalProperties: false,
+} as const;
 
-//     annotations: {
-//       destructiveHint: false,
-//       openWorldHint: false,
-//       readOnlyHint: true,
-//     },
-//   };
-// });
+const updateToolInputParser = z.object({
+  resumeTopping: z.string(),
+  resumePdf: z.object({
+    file_id: z.string(),
+    download_url: z.string().optional(),
+    res: z.any().optional(),
+  }),
+  items: z
+    .array(
+      z.object({
+        indexPath: z.string().min(1),
+        action: z.enum(["new", "update", "add", "delete"]),
+        value: z.any().optional(),
+      })
+    )
+    .min(1)
+    .optional()
+    .default([]),
+});
 
 
 const tools: Tool[] = widgets.map((widget) => {
   const isFileTool = FILE_TOOL_WIDGET.includes(widget.id);
-  const isDiagnose = DIAGNOSE_TOOL_WIDGET.includes(widget.id);
+  const isDiagnose = widget.id === "show-diagnose-resume";
+  const isUpdate = widget.id === "show-update-resume";
 
   return {
     name: widget.id,
@@ -282,9 +318,11 @@ const tools: Tool[] = widgets.map((widget) => {
 
     inputSchema: isFileTool
       ? parserToolInputSchema
-      : isDiagnose
-        ? diagnoseToolInputSchema
-        : toolInputSchema,
+      : isUpdate
+        ? updateToolInputSchema
+        : isDiagnose
+          ? diagnoseToolInputSchema
+          : toolInputSchema,
 
     _meta: {
       ...widgetDescriptorMeta(widget),
@@ -496,7 +534,9 @@ function createResumeServer(): Server {
       }
       if (widget.id === "show-update-resume") {
         console.log("Calling update-resume tool with args:", request.params);
-        const args = diagnoseToolInputParser.parse(request.params.arguments ?? {});
+
+        // ✅ 用 updateToolInputParser（能拿到 items）
+        const args = updateToolInputParser.parse(request.params.arguments ?? {});
         const fileId = args.resumePdf.file_id;
 
         // 1) 如果模型带了 res，直接用
@@ -508,17 +548,27 @@ function createResumeServer(): Server {
         console.log("[update] Cached analysis content:", resFromCache);
 
         const resToUse = resFromArgs ?? resFromCache;
-        // const resToUse = resFromCache;
 
         console.log("[update] file_id:", fileId);
         console.log("[update] has res:", Boolean(resToUse));
+        console.log("[update] items count:", args.items?.length ?? 0);
+
+        // ✅ 可选：做一次轻量规范化（避免 remove 带 value 或 set 没 value）
+        const normalizedItems = (args.items ?? []).filter((it) => {
+          if (it.action === "delete") return true;
+          return it.value !== undefined;
+        });
+        console.log("[update] normalized items:", normalizedItems);
 
         const url = "https://swan-api.jobright-internal.com/swan/resume/visitor/update";
         const data = {
-          structuredData: resToUse,
-        }
+          items: normalizedItems,     // ✅ 不再写死 []
+          structuredData: resToUse,   // ✅ 传结构化数据
+        };
+
         let res: any = null;
         try {
+          console.log('[update] Sending update request with data:', JSON.stringify(data));
           const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -529,27 +579,27 @@ function createResumeServer(): Server {
             throw new Error('网络请求错误: ' + response.status);
           }
 
-          res = await response.json(); // 直接在这里获取 JSON 数据
-          console.log('分析结果:', res);
-
-          // analysisByFileId.set(file_id, res.result);
-          // 现在你可以在这里或者函数外部安全地使用 res 了
+          res = await response.json();
+          console.log('[update] api result:', res);
         } catch (error) {
-          console.error('调用失败:', error);
+          console.error('[update] 调用失败:', error);
         }
 
-        // ✅ 这里就能用 resToUse 做诊断逻辑了
         return {
           content: [
             {
               type: "text",
-              text: `✅ Diagnose ready (file_id=${fileId})`,
+              text: `✅ Update ready (file_id=${fileId}, items=${normalizedItems.length})`,
             },
           ],
           structuredContent: {
             resumeTopping: args.resumeTopping,
             resumePdf: { file_id: fileId },
-            updateStruct: res, // 你也可以把它回传给 widget 渲染
+
+            // ✅ 把 items 和请求体也回传给 widget，方便你前端展示/调试
+            items: normalizedItems,
+            requestBody: data,
+            updateStruct: res,
           },
           _meta: widgetInvocationMeta(widget),
         };
@@ -725,7 +775,7 @@ const port = Number.isFinite(portEnv) ? portEnv : 8000;
 
 const httpServer = createServer(
   async (req: IncomingMessage, res: ServerResponse) => {
-    console.log(`[mcp] Incoming request: ${req.method} ${req.url}`);
+    // console.log(`[mcp] Incoming request: ${req.method} ${req.url}`);
     if (!req.url) {
       res.writeHead(400).end("Missing URL");
       return;
